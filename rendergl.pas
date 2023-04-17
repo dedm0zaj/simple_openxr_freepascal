@@ -40,7 +40,9 @@ procedure renderGlFrame(
   depthImage: TXrSwapchainImageOpenGLKHR;
   frameBuffer: GLuint;
   width: GLuint;
-  height: GLuint
+  height: GLuint;
+  handLeftPose : TXrPosef;
+  handRightPose : TXrPosef
   );
 
 implementation
@@ -48,6 +50,7 @@ implementation
 var
   programID   : GLint;
   posID       : GLint;
+  posObj      : GLint;
   projmatID   : GLint;
   posatribID  : GLint;
   coloratribID  : GLint;
@@ -59,6 +62,7 @@ var
   TimerFPS   : TTimerWin;
 
   vertexBuffer : GLuint;
+  vertexBufferHand : GLuint;
   colorBuffer : GLuint;
 
   vertexCube : array[0..107] of GLfloat = (
@@ -98,6 +102,45 @@ var
     0.3, 0.3, 0.3,
     -0.3, 0.3, 0.3,
     0.3,-0.3, 0.3
+  );
+
+  vertexCubeHand : array[0..107] of GLfloat = (
+    -0.03,-0.03,-0.03,
+    -0.03,-0.03, 0.03,
+    -0.03, 0.03, 0.03,
+    0.03, 0.03,-0.03,
+    -0.03,-0.03,-0.03,
+    -0.03, 0.03,-0.03,
+    0.03,-0.03, 0.03,
+    -0.03,-0.03,-0.03,
+    0.03,-0.03,-0.03,
+    0.03, 0.03,-0.03,
+    0.03,-0.03,-0.03,
+    -0.03,-0.03,-0.03,
+    -0.03,-0.03,-0.03,
+    -0.03, 0.03, 0.03,
+    -0.03, 0.03,-0.03,
+    0.03,-0.03, 0.03,
+    -0.03,-0.03, 0.03,
+    -0.03,-0.03,-0.03,
+    -0.03, 0.03, 0.03,
+    -0.03,-0.03, 0.03,
+    0.03,-0.03, 0.03,
+    0.03, 0.03, 0.03,
+    0.03,-0.03,-0.03,
+    0.03, 0.03,-0.03,
+    0.03,-0.03,-0.03,
+    0.03, 0.03, 0.03,
+    0.03,-0.03, 0.03,
+    0.03, 0.03, 0.03,
+    0.03, 0.03,-0.03,
+    -0.03, 0.03,-0.03,
+    0.03, 0.03, 0.03,
+    -0.03, 0.03,-0.03,
+    -0.03, 0.03, 0.03,
+    0.03, 0.03, 0.03,
+    -0.03, 0.03, 0.03,
+    0.03,-0.03, 0.03
   );
 
   colorCube : array[0..107] of GLfloat = (
@@ -163,10 +206,11 @@ const
     'attribute vec3 a_color;                             '+
     'uniform mat4 projmat;                               '+
     'uniform mat4 position;                              '+
+    'uniform mat4 position_obj;                          '+
     'varying vec4 v_color;                               '+
     'void main()                                         '+
     '{                                                   '+
-    '    gl_Position = (projmat * position) * a_position;'+
+    '    gl_Position = projmat * position * position_obj * a_position;'+
     '    v_color = vec4(a_color, 1.0f);                  '+
     '}';
   simpleFragmentShaderColor : AnsiString =
@@ -232,6 +276,7 @@ begin
   glUseProgram(programID);
 
   posID       := glGetUniformLocation(programID, 'position');
+  posObj      := glGetUniformLocation(programID, 'position_obj');
   projmatID   := glGetUniformLocation(programID, 'projmat');
   posatribID  := glGetAttribLocation (programID, 'a_position');
   coloratribID  := glGetAttribLocation (programID, 'a_color');
@@ -242,6 +287,10 @@ begin
   glGenBuffers(1, @vertexBuffer);
   glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
   glBufferData(GL_ARRAY_BUFFER, sizeof(vertexCube), @vertexCube[0], GL_STATIC_DRAW);
+
+  glGenBuffers(1, @vertexBufferHand);
+  glBindBuffer(GL_ARRAY_BUFFER, vertexBufferHand);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(vertexCubeHand), @vertexCubeHand[0], GL_STATIC_DRAW);
 
   glGenBuffers(1, @colorBuffer);
   glBindBuffer(GL_ARRAY_BUFFER, colorBuffer);
@@ -263,14 +312,26 @@ procedure renderGlFrame(
   depthImage: TXrSwapchainImageOpenGLKHR;
   frameBuffer: GLuint;
   width: GLuint;
-  height: GLuint
+  height: GLuint;
+  handLeftPose : TXrPosef;
+  handRightPose : TXrPosef
   );
 var
-  orient : TXrQuaternionf;
-  pos : TXrVector3f;
+  orientHead : TXrQuaternionf;
+  posHead : TXrVector3f;
+  orientHandLeft : TXrQuaternionf;
+  posHandLeft : TXrVector3f;
+  orientHandRight : TXrQuaternionf;
+  posHandRight : TXrVector3f;
 begin
-  orient := view.pose.orientation;
-  pos := view.pose.position;
+  orientHead := view.pose.orientation;
+  posHead := view.pose.position;
+
+  orientHandLeft := handLeftPose.orientation;
+  posHandLeft := handLeftPose.position;
+
+  orientHandRight := handRightPose.orientation;
+  posHandRight := handRightPose.position;
 
   glBindFramebuffer(GL_FRAMEBUFFER, frameBuffer);
 
@@ -286,7 +347,13 @@ begin
   glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT);
   glUniformMatrix4fv(projmatID, 1, GL_FALSE, MatProjection.GetMatrix);
 
+  MatModelView.Null;
+  MatModelView.Translate(posHead.x, posHead.y, posHead.z);
+  MatModelView.RotateQuat(orientHead.x, orientHead.y, orientHead.z, orientHead.w);
+  MatModelView.Invert;
+  glUniformMatrix4fv(posID, 1, GL_FALSE, MatModelView.GetMatrix);
 
+  // cube
   glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
 
   glVertexAttribPointer(
@@ -309,13 +376,67 @@ begin
 
   MatModelView.Null;
 
-  MatModelView.RotateQuat(orient.x, orient.y, orient.z, orient.w);
-  MatModelView.Translate(-pos.x,
-                         -pos.y + 0.5,
-                         -pos.z - 1.0);
+  MatModelView.Translate(0.0, 0.5, -1.0);
 
-  glUniformMatrix4fv(posID, 1, GL_TRUE, MatModelView.GetMatrix);
+  glUniformMatrix4fv(posObj, 1, GL_FALSE, MatModelView.GetMatrix);
   glDrawArrays(GL_TRIANGLES, 0, 12*3);
+
+  // hand left
+  glBindBuffer(GL_ARRAY_BUFFER, vertexBufferHand);
+
+  glVertexAttribPointer(
+    posatribID,
+    3,
+    GL_FLOAT,
+    GL_FALSE,
+    3*sizeof(GLfloat),
+    GLvoid(0));
+
+  glBindBuffer(GL_ARRAY_BUFFER, colorBuffer);
+
+  glVertexAttribPointer(
+    coloratribID,
+    3,
+    GL_FLOAT,
+    GL_FALSE,
+    0,
+    GLvoid(0));
+
+  MatModelView.Null;
+  MatModelView.Translate(posHandLeft.x, posHandLeft.y, posHandLeft.z);
+  MatModelView.RotateQuat(orientHandLeft.x, orientHandLeft.y, orientHandLeft.z, orientHandLeft.w);
+
+  glUniformMatrix4fv(posObj, 1, GL_FALSE, MatModelView.GetMatrix);
+  glDrawArrays(GL_TRIANGLES, 0, 12*3);
+
+  // hand right
+  glBindBuffer(GL_ARRAY_BUFFER, vertexBufferHand);
+
+  glVertexAttribPointer(
+    posatribID,
+    3,
+    GL_FLOAT,
+    GL_FALSE,
+    3*sizeof(GLfloat),
+    GLvoid(0));
+
+  glBindBuffer(GL_ARRAY_BUFFER, colorBuffer);
+
+  glVertexAttribPointer(
+    coloratribID,
+    3,
+    GL_FLOAT,
+    GL_FALSE,
+    0,
+    GLvoid(0));
+
+  MatModelView.Null;
+  MatModelView.Translate(posHandRight.x, posHandRight.y, posHandRight.z);
+  MatModelView.RotateQuat(orientHandRight.x, orientHandRight.y, orientHandRight.z, orientHandRight.w);
+
+  glUniformMatrix4fv(posObj, 1, GL_FALSE, MatModelView.GetMatrix);
+  glDrawArrays(GL_TRIANGLES, 0, 12*3);
+
 
   inc(fps_redraw);
 

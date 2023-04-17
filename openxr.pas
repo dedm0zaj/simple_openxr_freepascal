@@ -31,8 +31,13 @@ const
   XR_PTR_SIZE = 8;
   XR_NULL_HANDLE = 0;
   XR_NULL_SYSTEM_ID = 0;
+  XR_NULL_PATH = 0;
   XR_MAX_APPLICATION_NAME_SIZE = 128;
   XR_MAX_ENGINE_NAME_SIZE = 128;
+  XR_MAX_ACTION_SET_NAME_SIZE = 64;
+  XR_MAX_LOCALIZED_ACTION_SET_NAME_SIZE = 128;
+  XR_MAX_ACTION_NAME_SIZE = 64;
+  XR_MAX_LOCALIZED_ACTION_NAME_SIZE = 128;
 
   // Flag bits for XrSwapchainUsageFlags
   XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT = $00000001;
@@ -44,6 +49,12 @@ const
   XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT = $00000040;
   XR_SWAPCHAIN_USAGE_INPUT_ATTACHMENT_BIT_MND = $00000080;
   XR_SWAPCHAIN_USAGE_INPUT_ATTACHMENT_BIT_KHR = $00000080;  // alias of XR_SWAPCHAIN_USAGE_INPUT_ATTACHMENT_BIT_MND
+
+  // Flag bits for XrSpaceLocationFlags
+  XR_SPACE_LOCATION_ORIENTATION_VALID_BIT = $00000001;
+  XR_SPACE_LOCATION_POSITION_VALID_BIT = $00000002;
+  XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT = $00000004;
+  XR_SPACE_LOCATION_POSITION_TRACKED_BIT = $00000008;
 
 type
   uint8_t = UInt8;
@@ -57,6 +68,10 @@ type
 
   XrVersion = uint64_t;
   XrFlags64 = uint64_t;
+  XrAction = uint64_t;
+  PXrAction = ^XrAction;
+  XrActionSet = uint64_t;
+  PXrActionSet = ^XrActionSet;
   XrBool32 = uint32_t;
   XrTime = int64_t;
   XrDuration = int64_t;
@@ -78,6 +93,9 @@ type
   XrSwapchainUsageFlags = XrFlags64;
   XrViewStateFlags = XrFlags64;
   XrCompositionLayerFlags = XrFlags64;
+  XrPath = uint64_t;
+  PXrPath = ^XrPath;
+  XrSpaceLocationFlags = XrFlags64;
 
   //PFN_xrVoidFunction = procedure();
   PFN_xrVoidFunction = Pointer;
@@ -487,6 +505,15 @@ type
     XR_ENVIRONMENT_BLEND_MODE_MAX_ENUM = $7FFFFFFF
   );
 
+  XrActionType = (
+    XR_ACTION_TYPE_BOOLEAN_INPUT = 1,
+    XR_ACTION_TYPE_FLOAT_INPUT = 2,
+    XR_ACTION_TYPE_VECTOR2F_INPUT = 3,
+    XR_ACTION_TYPE_POSE_INPUT = 4,
+    XR_ACTION_TYPE_VIBRATION_OUTPUT = 100,
+    XR_ACTION_TYPE_MAX_ENUM = $7FFFFFFF
+  );
+
 type
   XrDebugUtilsMessageSeverityFlagsEXT = XrFlags64;
   XrDebugUtilsMessageTypeFlagsEXT = XrFlags64;
@@ -654,6 +681,7 @@ type
     w : single;
   end;
 
+  PXrPosef = ^TXrPosef;
   TXrPosef = record
     orientation : TXrQuaternionf;
     position : TXrVector3f;
@@ -796,6 +824,98 @@ type
     next : Pointer;
   end;
 
+  PXrActionSetCreateInfo = ^TXrActionSetCreateInfo;
+  TXrActionSetCreateInfo = record
+    type_ : XrStructureType;
+    next : Pointer;
+    actionSetName : array[0..XR_MAX_ACTION_SET_NAME_SIZE-1] of AnsiChar;
+    localizedActionSetName : array[0..XR_MAX_LOCALIZED_ACTION_SET_NAME_SIZE-1] of AnsiChar;
+    priority : uint32_t;
+  end;
+
+  PXrActionCreateInfo = ^TXrActionCreateInfo;
+  TXrActionCreateInfo = record
+    type_ : XrStructureType;
+    next : Pointer;
+    actionName : array[0..XR_MAX_ACTION_NAME_SIZE-1] of AnsiChar;
+    actionType : XrActionType;
+    countSubactionPaths : uint32_t;
+    subactionPaths : PXrPath;
+    localizedActionName : array[0..XR_MAX_LOCALIZED_ACTION_NAME_SIZE-1] of AnsiChar;
+  end;
+
+  PXrActionSpaceCreateInfo = ^TXrActionSpaceCreateInfo;
+  TXrActionSpaceCreateInfo = record
+    type_ : XrStructureType;
+    next : Pointer;
+    action : XrAction;
+    subactionPath : XrPath;
+    poseInActionSpace : TXrPosef;
+  end;
+
+  PXrActionSuggestedBinding = ^TXrActionSuggestedBinding;
+  TXrActionSuggestedBinding = record
+    action : XrAction;
+    binding : XrPath;
+  end;
+
+  PXrInteractionProfileSuggestedBinding = ^TXrInteractionProfileSuggestedBinding;
+  TXrInteractionProfileSuggestedBinding = record
+    type_ : XrStructureType;
+    next : Pointer;
+    interactionProfile : XrPath;
+    countSuggestedBindings : uint32_t;
+    suggestedBindings : PXrActionSuggestedBinding;
+  end;
+
+  PXrSessionActionSetsAttachInfo = ^TXrSessionActionSetsAttachInfo;
+  TXrSessionActionSetsAttachInfo = record
+    type_ : XrStructureType;
+    next : Pointer;
+    countActionSets : uint32_t;
+    actionSets : PXrActionSet;
+  end;
+
+  PXrActionStateGetInfo = ^TXrActionStateGetInfo;
+  TXrActionStateGetInfo = record
+    type_ : XrStructureType;
+    next : Pointer;
+    action : XrAction;
+    subactionPath : XrPath;
+  end;
+
+  PXrActionStateBoolean = ^TXrActionStateBoolean;
+  TXrActionStateBoolean = record
+    type_ : XrStructureType;
+    next : Pointer;
+    currentState : XrBool32;
+    changedSinceLastSync : XrBool32;
+    lastChangeTime : XrTime;
+    isActive : XrBool32;
+  end;
+
+  PXrSpaceLocation = ^TXrSpaceLocation;
+  TXrSpaceLocation = record
+    type_ : XrStructureType;
+    next : Pointer;
+    locationFlags : XrSpaceLocationFlags;
+    pose : TXrPosef;
+  end;
+
+  PXrActiveActionSet = ^TXrActiveActionSet;
+  TXrActiveActionSet = record
+    actionSet : XrActionSet;
+    subactionPath : XrPath;
+  end;
+
+  PXrActionsSyncInfo = ^TXrActionsSyncInfo;
+  TXrActionsSyncInfo = record
+    type_ : XrStructureType;
+    next : Pointer;
+    countActiveActionSets : uint32_t;
+    activeActionSets : PXrActiveActionSet;
+  end;
+
   PFN_xrCreateDebugUtilsMessengerEXT = function(
     instance: XrInstance;
     createInfo: PXrDebugUtilsMessengerCreateInfoEXT;
@@ -806,7 +926,7 @@ type
     messenger: XrDebugUtilsMessengerEXT
     ): XrResult;
 
-// function stdcall
+// functions stdcall
 type
   TxrGetInstanceProcAddr = function(
     p1: XrInstance;
@@ -937,6 +1057,65 @@ type
     releaseInfo: PXrSwapchainImageReleaseInfo
     ): XrResult; stdcall;
 
+  TxrCreateActionSet = function(
+    instance: XrInstance;
+    createInfo: PXrActionSetCreateInfo;
+    actionSet: PXrActionSet
+    ): XrResult; stdcall;
+
+  TxrDestroyActionSet = function(
+    actionSet: XrActionSet
+    ): XrResult; stdcall;
+
+  TxrCreateAction = function(
+    actionSet: XrActionSet;
+    createInfo: PXrActionCreateInfo;
+    action: PXrAction
+    ): XrResult; stdcall;
+
+  TxrDestroyAction = function(
+    action: XrAction
+    ): XrResult; stdcall;
+
+  TxrCreateActionSpace = function(
+    session: XrSession;
+    createInfo: PXrActionSpaceCreateInfo;
+    space: PXrSpace
+    ): XrResult; stdcall;
+
+  TxrStringToPath = function(
+    instance: XrInstance;
+    pathString: PAnsiChar;
+    path: PXrPath
+    ): XrResult; stdcall;
+
+  TxrSuggestInteractionProfileBindings = function(
+    instance: XrInstance;
+    suggestedBindings: PXrInteractionProfileSuggestedBinding
+    ): XrResult; stdcall;
+
+  TxrAttachSessionActionSets = function(
+    session: XrSession;
+    attachInfo: PXrSessionActionSetsAttachInfo
+    ): XrResult; stdcall;
+
+  TxrGetActionStateBoolean = function(
+    session: XrSession;
+    getInfo: PXrActionStateGetInfo;
+    state: PXrActionStateBoolean
+    ): XrResult; stdcall;
+
+  TxrLocateSpace = function(
+    space: XrSpace;
+    baseSpace: XrSpace;
+    time: XrTime;
+    location: PXrSpaceLocation
+    ): XrResult; stdcall;
+
+  TxrSyncActions = function(
+    session: XrSession;
+    syncInfo: PXrActionsSyncInfo
+    ): XrResult; stdcall;
 
 var
   xrGetInstanceProcAddr : TxrGetInstanceProcAddr;
@@ -962,6 +1141,17 @@ var
   xrAcquireSwapchainImage : TxrAcquireSwapchainImage;
   xrWaitSwapchainImage : TxrWaitSwapchainImage;
   xrReleaseSwapchainImage : TxrReleaseSwapchainImage;
+  xrCreateActionSet : TxrCreateActionSet;
+  xrDestroyActionSet : TxrDestroyActionSet;
+  xrCreateAction : TxrCreateAction;
+  xrDestroyAction : TxrDestroyAction;
+  xrCreateActionSpace : TxrCreateActionSpace;
+  xrStringToPath : TxrStringToPath;
+  xrSuggestInteractionProfileBindings : TxrSuggestInteractionProfileBindings;
+  xrAttachSessionActionSets : TxrAttachSessionActionSets;
+  xrGetActionStateBoolean : TxrGetActionStateBoolean;
+  xrLocateSpace : TxrLocateSpace;
+  xrSyncActions : TxrSyncActions;
 
 
 function initOpenXr(): boolean;
@@ -1001,6 +1191,20 @@ begin
   Pointer(xrAcquireSwapchainImage) := GetProcAddress(XrLibHandle, 'xrAcquireSwapchainImage');
   Pointer(xrWaitSwapchainImage) := GetProcAddress(XrLibHandle, 'xrWaitSwapchainImage');
   Pointer(xrReleaseSwapchainImage) := GetProcAddress(XrLibHandle, 'xrReleaseSwapchainImage');
+  Pointer(xrCreateActionSet) := GetProcAddress(XrLibHandle, 'xrCreateActionSet');
+  Pointer(xrDestroyActionSet) := GetProcAddress(XrLibHandle, 'xrDestroyActionSet');
+  Pointer(xrCreateAction) := GetProcAddress(XrLibHandle, 'xrCreateAction');
+  Pointer(xrDestroyAction) := GetProcAddress(XrLibHandle, 'xrDestroyAction');
+  Pointer(xrCreateActionSpace) := GetProcAddress(XrLibHandle, 'xrCreateActionSpace');
+  Pointer(xrStringToPath) := GetProcAddress(XrLibHandle, 'xrStringToPath');
+  Pointer(xrSuggestInteractionProfileBindings) :=
+    GetProcAddress(XrLibHandle, 'xrSuggestInteractionProfileBindings');
+  Pointer(xrAttachSessionActionSets) :=
+    GetProcAddress(XrLibHandle, 'xrAttachSessionActionSets');
+  Pointer(xrGetActionStateBoolean) :=
+    GetProcAddress(XrLibHandle, 'xrGetActionStateBoolean');
+  Pointer(xrLocateSpace) := GetProcAddress(XrLibHandle, 'xrLocateSpace');
+  Pointer(xrSyncActions) := GetProcAddress(XrLibHandle, 'xrSyncActions');
 
   result := true;
 end;

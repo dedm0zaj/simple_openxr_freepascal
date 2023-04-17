@@ -41,6 +41,9 @@ type
   ArrGLuint = array of GLuint;
   ArrArrGLuint = array of ArrGLuint;
 
+  TActionName = array[0..XR_MAX_ACTION_NAME_SIZE-1] of AnsiChar;
+  TLocalizedActionName = array[0..XR_MAX_LOCALIZED_ACTION_NAME_SIZE-1] of AnsiChar;
+
   TSwapchain = record
     swapchainXr: XrSwapchain;
     format : int64_t;
@@ -63,6 +66,9 @@ type
     swapchainsDepthImages : TwoArrXrSwapchainImageOpenGLKHR;
     frameBuffers : ArrArrGLuint;
     space : XrSpace;
+    actionSet : XrActionSet;
+    leftHandSpace : XrSpace;
+    rightHandSpace : XrSpace;
   end;
 
   ProcRenderGl = procedure(
@@ -71,7 +77,9 @@ type
     depthImage: TXrSwapchainImageOpenGLKHR;
     frameBuffer: GLuint;
     width: GLuint;
-    height: GLuint
+    height: GLuint;
+    handLeftPose : TXrPosef;
+    handRightPose : TXrPosef
     );
 
   function initXr(): TXrDataInit;
@@ -147,7 +155,6 @@ end;
 
 function createXrInstance() : XrInstance;
 const
-  APPLICATION_NAME = 'OpenXR Example';
   MAJOR_VERSION = 0;
   MINOR_VERSION = 1;
   PATCH_VERSION = 0;
@@ -167,8 +174,8 @@ begin
   instanceCreateInfo.type_ := XR_TYPE_INSTANCE_CREATE_INFO;
   instanceCreateInfo.next := nil;
   instanceCreateInfo.createFlags := 0;
-  instanceCreateInfo.applicationInfo.applicationName := APPLICATION_NAME;
-  instanceCreateInfo.applicationInfo.engineName := APPLICATION_NAME;
+  instanceCreateInfo.applicationInfo.applicationName := 'OpenXR Example';
+  instanceCreateInfo.applicationInfo.engineName := 'OpenXR Example';
 
   instanceCreateInfo.applicationInfo.applicationVersion := 1;
   instanceCreateInfo.applicationInfo.engineVersion := 0;
@@ -545,6 +552,7 @@ var
   resultXr : XrResult;
 begin
   spaceCreateInfo.type_ := XR_TYPE_REFERENCE_SPACE_CREATE_INFO;
+  spaceCreateInfo.next := nil;
   spaceCreateInfo.referenceSpaceType := XR_REFERENCE_SPACE_TYPE_STAGE;
   spaceCreateInfo.poseInReferenceSpace.orientation.x := 0;
   spaceCreateInfo.poseInReferenceSpace.orientation.y := 0;
@@ -569,13 +577,287 @@ begin
   xrDestroySpace(space);
 end;
 
+function createActionSet(instance: XrInstance): XrActionSet;
+var
+  actionSet : XrActionSet;
+  actionSetCreateInfo : TXrActionSetCreateInfo;
+  resultXr : XrResult;
+begin
+  actionSetCreateInfo.type_ := XR_TYPE_ACTION_SET_CREATE_INFO;
+  actionSetCreateInfo.next := nil;
+  actionSetCreateInfo.actionSetName := 'oculus';
+  actionSetCreateInfo.localizedActionSetName := 'Oculus';
+  actionSetCreateInfo.priority := 0;
+
+  resultXr := xrCreateActionSet(instance, @actionSetCreateInfo, @actionSet);
+
+  if resultXr <> XR_SUCCESS then begin
+    writeln('Failed to create action set:   ', resultXr);
+    exit(XR_NULL_HANDLE);
+  end;
+
+  result := actionSet;
+end;
+
+procedure destroyActionSet(actionSet: XrActionSet);
+begin
+  xrDestroyActionSet(actionSet);
+end;
+
+function createAction(
+  actionSet: XrActionSet;
+  name: TActionName;
+  localizedName: TLocalizedActionName;
+  type_: XrActionType
+  ): XrAction;
+var
+  action : XrAction;
+  actionCreateInfo : TXrActionCreateInfo;
+  resultXr : XrResult;
+begin
+  actionCreateInfo.type_ := XR_TYPE_ACTION_CREATE_INFO;
+  actionCreateInfo.next := nil;
+  actionCreateInfo.actionName := name;
+  actionCreateInfo.localizedActionName := localizedName;
+  actionCreateInfo.actionType := type_;
+
+  resultXr := xrCreateAction(actionSet, @actionCreateInfo, @action);
+
+  if resultXr <> XR_SUCCESS then begin
+    writeln('Failed to create action:   ', resultXr);
+    exit(XR_NULL_HANDLE);
+  end;
+
+  result := action;
+end;
+
+procedure destroyAction(action: XrAction);
+begin
+  xrDestroyAction(action);
+end;
+
+function createActionSpace(session: XrSession; action: XrAction): XrSpace;
+var
+  space : XrSpace;
+  actionSpaceCreateInfo : TXrActionSpaceCreateInfo;
+  resultXr : XrResult;
+begin
+  actionSpaceCreateInfo.type_ := XR_TYPE_ACTION_SPACE_CREATE_INFO;
+  actionSpaceCreateInfo.next := nil;
+  actionSpaceCreateInfo.poseInActionSpace.orientation.x := 0;
+  actionSpaceCreateInfo.poseInActionSpace.orientation.y := 0;
+  actionSpaceCreateInfo.poseInActionSpace.orientation.z := 0;
+  actionSpaceCreateInfo.poseInActionSpace.orientation.w := 1;
+  actionSpaceCreateInfo.poseInActionSpace.position.x := 0;
+  actionSpaceCreateInfo.poseInActionSpace.position.y := 0;
+  actionSpaceCreateInfo.poseInActionSpace.position.z := 0;
+  actionSpaceCreateInfo.action := action;
+
+  resultXr := xrCreateActionSpace(session, @actionSpaceCreateInfo, @space);
+
+  if resultXr <> XR_SUCCESS then begin
+    writeln('Failed to create action space:   ', resultXr);
+    exit(XR_NULL_HANDLE);
+  end;
+
+  result := space;
+end;
+
+procedure destroyActionSpace(actionSpace: XrSpace);
+begin
+  xrDestroySpace(actionSpace);
+end;
+
+function getPath(instance: XrInstance; name: PAnsiChar): XrPath;
+var
+  path : XrPath;
+  resultXr : XrResult;
+begin
+  resultXr := xrStringToPath(instance, name, @path);
+
+  if resultXr <> XR_SUCCESS then begin
+    writeln('Failed to get path   ', name, ' :   ', resultXr);
+    exit(XR_NULL_HANDLE);
+  end;
+
+  result := path;
+end;
+
+procedure suggestBindings(
+  instance: XrInstance;
+  leftHandAction: XrAction;
+  rightHandAction: XrAction
+  );
+var
+  leftHandPath : XrPath;
+  rightHandPath : XrPath;
+  interactionProfilePath : XrPath;
+  suggestedBindings : array[0..1] of TXrActionSuggestedBinding;
+  suggestedBinding : TXrInteractionProfileSuggestedBinding;
+  resultXr : XrResult;
+begin
+  leftHandPath := getPath(instance, '/user/hand/left/input/grip/pose');
+  rightHandPath := getPath(instance, '/user/hand/right/input/grip/pose');
+  interactionProfilePath := getPath(instance, '/interaction_profiles/oculus/touch_controller');
+
+  suggestedBindings[0].action := leftHandAction;
+  suggestedBindings[0].binding := leftHandPath;
+  suggestedBindings[1].action := rightHandAction;
+  suggestedBindings[1].binding := rightHandPath;
+
+  suggestedBinding.type_ := XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING;
+  suggestedBinding.next := nil;
+  suggestedBinding.interactionProfile := interactionProfilePath;
+  suggestedBinding.countSuggestedBindings := Length(suggestedBindings);
+  suggestedBinding.suggestedBindings := @suggestedBindings[0];
+
+  resultXr := xrSuggestInteractionProfileBindings(instance, @suggestedBinding);
+
+  if resultXr <> XR_SUCCESS then begin
+    writeln('Failed to suggest interaction profile bindings:   ', resultXr);
+  end;
+end;
+
+procedure attachActionSet(session: XrSession; actionSet: XrActionSet);
+var
+  actionSetsAttachInfo : TXrSessionActionSetsAttachInfo;
+  resultXr : XrResult;
+begin
+  actionSetsAttachInfo.type_ := XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO;
+  actionSetsAttachInfo.next := nil;
+  actionSetsAttachInfo.countActionSets := 1;
+  actionSetsAttachInfo.actionSets := @actionSet;
+
+  resultXr := xrAttachSessionActionSets(session, @actionSetsAttachInfo);
+
+  if resultXr <> XR_SUCCESS then begin
+    writeln('Failed to attach action set:   ', resultXr);
+  end;
+end;
+
+function getActionBoolean(session: XrSession; action: XrAction): boolean;
+var
+  getInfo : TXrActionStateGetInfo;
+  state : TXrActionStateBoolean;
+  resultXr : XrResult;
+begin
+  getInfo.type_ := XR_TYPE_ACTION_STATE_GET_INFO;
+  getInfo.action := action;
+
+  state.type_ := XR_TYPE_ACTION_STATE_BOOLEAN;
+
+  resultXr := xrGetActionStateBoolean(session, @getInfo, @state);
+
+  if resultXr <> XR_SUCCESS then begin
+    writeln('Failed to get boolean action state:   ', resultXr);
+    exit(false);
+  end;
+
+  result := state.currentState <> 0;
+end;
+
+function getActionPose(
+  space: XrSpace;
+  roomSpace: XrSpace;
+  predictedDisplayTime: XrTime
+  ): TXrPosef;
+var
+  pose : TXrPosef;
+  location : TXrSpaceLocation;
+  resultXr : XrResult;
+  posBool : boolean;
+  orientBool : boolean;
+begin
+  pose.orientation.x := 0;
+  pose.orientation.y := 0;
+  pose.orientation.z := 0;
+  pose.orientation.w := 1;
+  pose.position.x := 0;
+  pose.position.y := 0;
+  pose.position.z := 0;
+
+  location.type_ := XR_TYPE_SPACE_LOCATION;
+  location.next := nil;
+
+  resultXr := xrLocateSpace(space, roomSpace, predictedDisplayTime, @location);
+
+  if resultXr <> XR_SUCCESS then begin
+    writeln('Failed to locate space:   ', resultXr);
+    exit(pose);
+  end;
+
+  posBool := (location.locationFlags and XR_SPACE_LOCATION_POSITION_VALID_BIT) <> 0;
+  orientBool := (location.locationFlags and XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT) <> 0;
+
+  if ((not posBool) or (not orientBool)) then begin
+    writeln('Received incomplete result when locating space');
+    exit(pose);
+  end;
+
+  result := location.pose;
+end;
+
+function inputXr(
+  session: XrSession;
+  actionSet: XrActionSet;
+  roomSpace: XrSpace;
+  predictedDisplayTime: XrTime;
+  leftHandSpace: XrSpace;
+  rightHandSpace: XrSpace;
+  handLeftPose: PXrPosef;
+  handRightPose: PXrPosef
+  ): boolean;
+var
+  activeActionSet : TXrActiveActionSet;
+  syncInfo : TXrActionsSyncInfo;
+  resultXr : XrResult;
+  handLeftPoseTemp: TXrPosef;
+  handRightPoseTemp: TXrPosef;
+begin
+  activeActionSet.actionSet := actionSet;
+  activeActionSet.subactionPath := XR_NULL_PATH;
+
+  syncInfo.type_ := XR_TYPE_ACTIONS_SYNC_INFO;
+  syncInfo.next := nil;
+  syncInfo.countActiveActionSets := 1;
+  syncInfo.activeActionSets := @activeActionSet;
+
+  resultXr := xrSyncActions(session, @syncInfo);
+
+  if resultXr = XR_SESSION_NOT_FOCUSED then begin
+    exit(true);
+  end
+  else if resultXr <> XR_SUCCESS then begin
+    writeln('Failed to synchronize actions:   ', resultXr);
+    exit(false);
+  end;
+
+  handLeftPoseTemp := getActionPose(
+                          leftHandSpace,
+                          roomSpace,
+                          predictedDisplayTime);
+  handRightPoseTemp := getActionPose(
+                          rightHandSpace,
+                          roomSpace,
+                          predictedDisplayTime);
+
+  handLeftPose^.orientation := handLeftPoseTemp.orientation;
+  handLeftPose^.position := handLeftPoseTemp.position;
+  handRightPose^.orientation := handRightPoseTemp.orientation;
+  handRightPose^.position := handRightPoseTemp.position;
+
+  result := true;
+end;
+
 function renderEye(
   swapchain: TSwapchain;
   view: TXrView;
   images: ArrXrSwapchainImageOpenGLKHR;
   swapchainDepth: TSwapchain;
   depthImages: ArrXrSwapchainImageOpenGLKHR;
-  frameBuffers: ArrGLuint
+  frameBuffers: ArrGLuint;
+  handLeftPose : TXrPosef;
+  handRightPose : TXrPosef
   ): boolean;
 var
   acquireImageInfo : TXrSwapchainImageAcquireInfo;
@@ -632,6 +914,7 @@ begin
     exit(false);
   end;
 
+  // TODO add hands poses
   /////////////////// RENDER ///////////////////////
   renderGl(
     view,
@@ -639,7 +922,9 @@ begin
     depthImages[activeDepthIndex],
     frameBuffers[activeIndex],
     swapchain.width,
-    swapchain.height);
+    swapchain.height,
+    handLeftPose,
+    handRightPose);
 
   // image
   releaseImageInfo.type_ := XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO;
@@ -674,7 +959,9 @@ function render(
   depthImages: TwoArrXrSwapchainImageOpenGLKHR;
   frameBuffers: ArrArrGLuint;
   space: XrSpace;
-  predictedDisplayTime: XrTime
+  predictedDisplayTime: XrTime;
+  handLeftPose : TXrPosef;
+  handRightPose : TXrPosef
   ): boolean;
 var
   beginFrameInfo : TXrFrameBeginInfo;
@@ -728,7 +1015,9 @@ begin
       images[i],
       swapchainsDepth[i],
       depthImages[i],
-      frameBuffers[i]);
+      frameBuffers[i],
+      handLeftPose,
+      handRightPose);
   end;
 
   for i := 0 to EYE_COUNT-1 do begin
@@ -797,6 +1086,11 @@ var
   swapchainsDepthImages : TwoArrXrSwapchainImageOpenGLKHR;
   frameBuffers : ArrArrGLuint;
   space : XrSpace;
+  actionSet : XrActionSet;
+  leftHandAction : XrAction;
+  rightHandAction : XrAction;
+  leftHandSpace : XrSpace;
+  rightHandSpace : XrSpace;
   xrDataPostInit : TXrDataPostInit;
 begin
   session := createSessionXr(xrDataInit.instance, xrDataInit.systemID, dc, hrc);
@@ -817,6 +1111,16 @@ begin
 
   space := createSpace(session);
 
+  actionSet := createActionSet(xrDataInit.instance);
+  leftHandAction := createAction(actionSet, 'left-hand', 'Left-Hand', XR_ACTION_TYPE_POSE_INPUT);
+  rightHandAction := createAction(actionSet, 'right-hand', 'Right-Hand', XR_ACTION_TYPE_POSE_INPUT);
+  leftHandSpace := createActionSpace(session, leftHandAction);
+  rightHandSpace := createActionSpace(session, rightHandAction);
+
+  suggestBindings(xrDataInit.instance, leftHandAction, rightHandAction);
+  attachActionSet(session, actionSet);
+
+
   quitLoop := false;
   runningLoop := true;
 
@@ -827,6 +1131,9 @@ begin
   xrDataPostInit.swapchainsDepthImages := swapchainsDepthImages;
   xrDataPostInit.frameBuffers := frameBuffers;
   xrDataPostInit.space := space;
+  xrDataPostInit.actionSet := actionSet;
+  xrDataPostInit.leftHandSpace := leftHandSpace;
+  xrDataPostInit.rightHandSpace := rightHandSpace;
 
   result := xrDataPostInit;
 end;
@@ -839,6 +1146,8 @@ var
   sessionBeginInfo : TXrSessionBeginInfo;
   frameWaitInfo : TXrFrameWaitInfo;
   frameState : TXrFrameState;
+  handLeftPose : TXrPosef;
+  handRightPose : TXrPosef;
 begin
   if not quitLoop then begin
     eventData.type_ := XR_TYPE_EVENT_DATA_BUFFER;
@@ -857,6 +1166,16 @@ begin
           exit;
         end;
 
+        quitLoop := not inputXr(
+          xrDataPostInit.session,
+          xrDataPostInit.actionSet,
+          xrDataPostInit.space,
+          frameState.predictedDisplayTime,
+          xrDataPostInit.leftHandSpace,
+          xrDataPostInit.rightHandSpace,
+          @handLeftPose,
+          @handRightPose);
+
         if frameState.shouldRender = 0 then
           exit;
 
@@ -868,7 +1187,9 @@ begin
           xrDataPostInit.swapchainsDepthImages,
           xrDataPostInit.frameBuffers,
           xrDataPostInit.space,
-          frameState.predictedDisplayTime);
+          frameState.predictedDisplayTime,
+          handLeftPose,
+          handRightPose);
       end;
     end
     else if resultXr <> XR_SUCCESS then begin

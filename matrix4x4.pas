@@ -46,6 +46,7 @@ type
       procedure     RotateQuat(x, y, z, w: single);
       procedure     Translate(x, y, z: single);
       procedure     Scale(x, y, z : single);
+      procedure     Invert;
       procedure     Multiply(const mat : Arr0to15);
       procedure     ToProjectionMatrix (fov, nearPl, farPl, width, height : single);
       procedure     ToProjectionMatrixFromAngles(
@@ -68,12 +69,13 @@ end;
 
 constructor TMatrix4x4.Create;
 begin
-  matrix[0]  := 1;  matrix[1]  := 0;  matrix[2]  := 0;  matrix[3]  := 0;
-  matrix[4]  := 0;  matrix[5]  := 1;  matrix[6]  := 0;  matrix[7]  := 0;
-  matrix[8]  := 0;  matrix[9]  := 0;  matrix[10] := 1;  matrix[11] := 0;
-  matrix[12] := 0;  matrix[13] := 0;  matrix[14] := 0;  matrix[15] := 1;
+  matrix[0] := 1;  matrix[4] := 0;  matrix[8]  := 0;  matrix[12] := 0;
+  matrix[1] := 0;  matrix[5] := 1;  matrix[9]  := 0;  matrix[13] := 0;
+  matrix[2] := 0;  matrix[6] := 0;  matrix[10] := 1;  matrix[14] := 0;
+  matrix[3] := 0;  matrix[7] := 0;  matrix[11] := 0;  matrix[15] := 1;
 end;
 
+// TODO need transpose
 procedure TMatrix4x4.Rotate(oxyz: byte; angle: single);
 var
   ca, sa: single;
@@ -201,12 +203,13 @@ end;
 
 procedure TMatrix4x4.Translate(x, y, z: single);
 begin
-  matrix[3]  := matrix[0]*x  + matrix[1]*y  + matrix[2]*z  + matrix[3];
-  matrix[7]  := matrix[4]*x  + matrix[5]*y  + matrix[6]*z  + matrix[7];
-  matrix[11] := matrix[8]*x  + matrix[9]*y  + matrix[10]*z + matrix[11];
-  matrix[15] := matrix[12]*x + matrix[13]*y + matrix[14]*z + matrix[15];
+  matrix[12]  := matrix[0]*x  + matrix[4]*y  + matrix[8]*z  + matrix[12];
+  matrix[13]  := matrix[1]*x  + matrix[5]*y  + matrix[9]*z  + matrix[13];
+  matrix[14] := matrix[2]*x  + matrix[6]*y  + matrix[10]*z + matrix[14];
+  matrix[15] := matrix[3]*x + matrix[7]*y + matrix[11]*z + matrix[15];
 end;
 
+// TODO need transpose
 procedure TMatrix4x4.Scale(x, y, z : single);
 begin
   matrix[0]  := matrix[0] * x;
@@ -224,6 +227,30 @@ begin
   matrix[12] := matrix[12] * x;
   matrix[13] := matrix[13] * y;
   matrix[14] := matrix[14] * z;
+end;
+
+procedure TMatrix4x4.Invert;
+var
+  mat_new : Arr0to15;
+begin
+  mat_new[0] := matrix[0];
+	mat_new[1] := matrix[4];
+	mat_new[2] := matrix[8];
+	mat_new[3] := 0.0;
+	mat_new[4] := matrix[1];
+	mat_new[5] := matrix[5];
+	mat_new[6] := matrix[9];
+	mat_new[7] := 0.0;
+	mat_new[8] := matrix[2];
+	mat_new[9] := matrix[6];
+	mat_new[10] := matrix[10];
+	mat_new[11] := 0.0;
+	mat_new[12] := -(matrix[0] * matrix[12] + matrix[1] * matrix[13] + matrix[2] * matrix[14]);
+	mat_new[13] := -(matrix[4] * matrix[12] + matrix[5] * matrix[13] + matrix[6] * matrix[14]);
+	mat_new[14] := -(matrix[8] * matrix[12] + matrix[9] * matrix[13] + matrix[10] * matrix[14]);
+	mat_new[15] := 1.0;
+
+  matrix := mat_new;
 end;
 
 procedure TMatrix4x4.Multiply(const mat : Arr0to15);
@@ -253,6 +280,7 @@ begin
   matrix := mat_new;
 end;
 
+// TODO need transpose
 procedure TMatrix4x4.ToProjectionMatrix(fov, nearPl, farPl, width, height : single);
 var
   f, A, B, asp : single;
@@ -320,10 +348,10 @@ end;
 
 procedure TMatrix4x4.Null;
 begin
-  matrix[0]  := 1;  matrix[1]  := 0;  matrix[2]  := 0;  matrix[3]  := 0;
-  matrix[4]  := 0;  matrix[5]  := 1;  matrix[6]  := 0;  matrix[7]  := 0;
-  matrix[8]  := 0;  matrix[9]  := 0;  matrix[10] := 1;  matrix[11] := 0;
-  matrix[12] := 0;  matrix[13] := 0;  matrix[14] := 0;  matrix[15] := 1;
+  matrix[0] := 1;  matrix[4] := 0;  matrix[8]  := 0;  matrix[12] := 0;
+  matrix[1] := 0;  matrix[5] := 1;  matrix[9]  := 0;  matrix[13] := 0;
+  matrix[2] := 0;  matrix[6] := 0;  matrix[10] := 1;  matrix[14] := 0;
+  matrix[3] := 0;  matrix[7] := 0;  matrix[11] := 0;  matrix[15] := 1;
 end;
 
 function TMatrix4x4.GetMatrix: PSingle;
